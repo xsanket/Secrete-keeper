@@ -7,6 +7,10 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const ejs = require("ejs");
 const mongoose = require("mongoose");
+//google Oauth 
+const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const findOrCreate = require('mongoose-findorcreate');
+
 // const bcrypt = require("bcrypt");
 // const saltRounds = 10;
 
@@ -43,11 +47,13 @@ mongoose.connect("mongodb://127.0.0.1:27017/userDB");
 // creating object of mongoose schema to encript user password
 const userSchema= new mongoose.Schema({
     email: String ,
-    password: String
+    password: String,
+    googleId: String
 }); 
 
 
 userSchema.plugin(passportLocalMongoose);
+userSchema.plugin(findOrCreate);
 
 // userSchema.plugin(encrypt, { secret:process.env.SECRET , encryptedFields: ["password"]});
 // collection user
@@ -56,15 +62,65 @@ const User = new mongoose.model("User", userSchema);
 // writting serialization and deserialization to conver object int o byte stream and vice versa
 passport.use(User.createStrategy());
 //passport.use(new LocalStrategy(User.authenticate()))
-passport.serializeUser(User.serializeUser());
-passport.deserializeUser(User.deserializeUser());
+// passport.serializeUser(User.serializeUser());
+// passport.deserializeUser(User.deserializeUser());
+// new passport seri and deser method for google ouath
+passport.serializeUser(function(user, done) {
+    done(null, user.id); 
+  
+});
+passport.deserializeUser(function(id, done) {
+    User.findById(id)
+        .then(user => {
+            done(null, user);
+        })
+        .catch(err => {
+            done(err, null);
+        });
+});
 
+
+// passport-google-Outh
+passport.use(new GoogleStrategy({
+    clientID: process.env.CLIENT_ID,
+    clientSecret: process.env.CLIENT_SECRET,
+    callbackURL: "http://localhost:3000/auth/google/secrets",
+    userProfileURL: "https://www.googleapis.com/oauth2/v3/userinfo"
+  },
+  function(accessToken, refreshToken, profile, cb) {
+    User.findOrCreate({ googleId: profile.id }, function (err, user) {
+      return cb(err, user);
+    });
+  }
+));
 
 
 
 app.get("/", function(req, res){
     res.render("home");
 });
+
+//GOOGLE Oauth
+// app.get("/auth/google", function(req, res){
+//     passport.authenticate("google", { scope: ['profile'] })
+// })
+
+app.get('/auth/google',
+  passport.authenticate('google', { scope: ['profile'] }
+  ));
+
+app.get('/auth/google/secrets', 
+  passport.authenticate('google', { failureRedirect: '/login' }),
+  function(req, res) {
+    // Successful authentication, redirect secret.
+    res.redirect('/secrets');
+  });
+
+
+
+
+
+
 
 app.get("/login", function(req, res){
     res.render("login");
@@ -85,8 +141,21 @@ app.get("/secrets", function(req, res){
     }
 });
 
-// post for reg page
+app.get("/logout", function(req, res){
+    req.logout(function(err){
+        if(err){
+            console.log(err)
+        }
+        else{
+            res.redirect("/");
+        }
+    });
+    
+});
 
+
+
+// post for reg page
 app.post("/register", function(req, res){
 
     User.register({username: req.body.username}, req.body.password, function(err, user){
@@ -106,8 +175,24 @@ app.post("/register", function(req, res){
 
 
 app.post("/login", function(req, res){
-    const username = req.body.username;
-    const password = req.body.password;
+    
+    const user = new User({
+        username: req.body.username,
+       password: req.body.password
+    });
+  // .login() is a passport method
+    req.login(user, function(err){
+        if(err){
+            console.log(err);
+        }
+        else{
+            passport.authenticate("local")(req, res, function(){
+                res.redirect("/secrets");
+            });
+          
+        }
+    });
+
 
     // User.findOne({email:username})
     // .then((foundUser)=>{
@@ -131,6 +216,7 @@ app.post("/login", function(req, res){
     // })
 
 });
+
 
 
 
